@@ -1,0 +1,21 @@
+{
+  "visible": true,
+  "confidence": 0.9995885491371155,
+  "right_shoulder": [
+    302,
+    304
+  ],
+  "right_elbow": [
+    203,
+    355
+  ],
+  "right_wrist": [
+    226,
+    227
+  ],
+  "right_arm_raise_angle": 62.74467162505693,
+  "right_elbow_angle": 52.558041865112145,
+  "reason": "ok"
+}
+overlay_path: images/week3/pose_result_overlay.jpg
+json_path: logs/week3/pose_result.json
