@@ -82,9 +82,9 @@ def callback(msg):
         print("Frame length:", len(target_frame))
 
         frames = [
-            (BASE_FRAME, 600, 100),
-            (target_frame, 900, 500),
-            (BASE_FRAME, 900, 0)
+            (BASE_FRAME, 800, 200),
+            (target_frame, 1200, 2500),
+            (BASE_FRAME, 1200, 0),
         ]
 
         busy = True
