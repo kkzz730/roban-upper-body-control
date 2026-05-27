@@ -3,11 +3,7 @@
 
 def smooth_angle(prev_angle, new_angle, alpha=0.3):
     """
-    指数滑动平均滤波。
-
-    prev_angle: 上一次平滑后的角度
-    new_angle: 当前原始角度
-    alpha: 平滑系数，越大越跟手，越小越平稳
+    Exponential moving average for angle smoothing.
     """
     if prev_angle is None:
         return new_angle
@@ -20,7 +16,7 @@ def smooth_angle(prev_angle, new_angle, alpha=0.3):
 
 class AngleSmoother(object):
     """
-    多角度平滑器，用于同时平滑 right_arm_raise_angle 和 right_elbow_angle。
+    Smooth multiple upper-body angle fields.
     """
     def __init__(self, alpha=0.3):
         self.alpha = alpha
@@ -34,55 +30,95 @@ class AngleSmoother(object):
 
     def update_result(self, pose_result):
         """
-        输入 detect_upper_body_angles() 的输出 dict。
-        返回加入 smoothed_right_arm_raise_angle 和 smoothed_right_elbow_angle 的新 dict。
+        Input: result dict from detect_upper_body_angles().
+        Output: result dict with smoothed angle fields.
+
+        If visible=False, smoothed angle fields are None.
         """
         result = dict(pose_result)
 
+        angle_fields = [
+            "left_arm_raise_angle",
+            "left_elbow_angle",
+            "right_arm_raise_angle",
+            "right_elbow_angle"
+        ]
+
         if not result.get("visible", False):
-            result["smoothed_right_arm_raise_angle"] = None
-            result["smoothed_right_elbow_angle"] = None
+            for field in angle_fields:
+                result["smoothed_" + field] = None
             return result
 
-        result["smoothed_right_arm_raise_angle"] = self.update(
-            "right_arm_raise_angle",
-            result.get("right_arm_raise_angle")
-        )
-
-        result["smoothed_right_elbow_angle"] = self.update(
-            "right_elbow_angle",
-            result.get("right_elbow_angle")
-        )
+        for field in angle_fields:
+            result["smoothed_" + field] = self.update(
+                field,
+                result.get(field)
+            )
 
         return result
 
 
 if __name__ == "__main__":
-    # 模拟几帧角度，包含一次明显突变，用于验证平滑效果
-    raw_raise_angles = [60.0, 62.0, 61.0, 78.0, 63.0, 62.5, 62.0]
-    raw_elbow_angles = [52.0, 54.0, 53.0, 70.0, 55.0, 53.5, 52.8]
+    # Simulated angle sequence with sudden changes.
+    raw_frames = [
+        {
+            "left_arm_raise_angle": 60.0,
+            "left_elbow_angle": 52.0,
+            "right_arm_raise_angle": 61.0,
+            "right_elbow_angle": 53.0
+        },
+        {
+            "left_arm_raise_angle": 62.0,
+            "left_elbow_angle": 54.0,
+            "right_arm_raise_angle": 62.0,
+            "right_elbow_angle": 54.0
+        },
+        {
+            "left_arm_raise_angle": 61.0,
+            "left_elbow_angle": 53.0,
+            "right_arm_raise_angle": 61.5,
+            "right_elbow_angle": 53.5
+        },
+        {
+            "left_arm_raise_angle": 78.0,
+            "left_elbow_angle": 70.0,
+            "right_arm_raise_angle": 79.0,
+            "right_elbow_angle": 71.0
+        },
+        {
+            "left_arm_raise_angle": 63.0,
+            "left_elbow_angle": 55.0,
+            "right_arm_raise_angle": 63.5,
+            "right_elbow_angle": 55.5
+        },
+    ]
 
     smoother = AngleSmoother(alpha=0.3)
 
-    print("frame, raw_raise, smooth_raise, raw_elbow, smooth_elbow")
+    print(
+        "frame, "
+        "raw_L_raise, smooth_L_raise, "
+        "raw_L_elbow, smooth_L_elbow, "
+        "raw_R_raise, smooth_R_raise, "
+        "raw_R_elbow, smooth_R_elbow"
+    )
 
-    for i, (raise_angle, elbow_angle) in enumerate(
-        zip(raw_raise_angles, raw_elbow_angles)
-    ):
-        pose_result = {
-            "visible": True,
-            "right_arm_raise_angle": raise_angle,
-            "right_elbow_angle": elbow_angle
-        }
+    for i, frame in enumerate(raw_frames):
+        pose_result = {"visible": True}
+        pose_result.update(frame)
 
         smoothed = smoother.update_result(pose_result)
 
         print(
-            "%d, %.2f, %.2f, %.2f, %.2f" % (
+            "%d, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f" % (
                 i,
-                raise_angle,
+                frame["left_arm_raise_angle"],
+                smoothed["smoothed_left_arm_raise_angle"],
+                frame["left_elbow_angle"],
+                smoothed["smoothed_left_elbow_angle"],
+                frame["right_arm_raise_angle"],
                 smoothed["smoothed_right_arm_raise_angle"],
-                elbow_angle,
+                frame["right_elbow_angle"],
                 smoothed["smoothed_right_elbow_angle"]
             )
         )

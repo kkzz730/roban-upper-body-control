@@ -1,0 +1,37 @@
+{
+  "visible": true,
+  "confidence": 0.9976263642311096,
+  "left_shoulder": [
+    457,
+    302
+  ],
+  "left_elbow": [
+    571,
+    360
+  ],
+  "left_wrist": [
+    559,
+    232
+  ],
+  "right_shoulder": [
+    302,
+    304
+  ],
+  "right_elbow": [
+    203,
+    355
+  ],
+  "right_wrist": [
+    226,
+    227
+  ],
+  "left_arm_raise_angle": 63.03428556712985,
+  "left_elbow_angle": 57.67846052427466,
+  "right_arm_raise_angle": 62.74467162505693,
+  "right_elbow_angle": 52.558041865112145,
+  "reason": "ok",
+  "smoothed_left_arm_raise_angle": 63.03428556712985,
+  "smoothed_left_elbow_angle": 57.67846052427466,
+  "smoothed_right_arm_raise_angle": 62.74467162505693,
+  "smoothed_right_elbow_angle": 52.558041865112145
+}
