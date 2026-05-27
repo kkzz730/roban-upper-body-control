@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+*.bag
+*.mp4
+*.avi
+.env
+venv/
+.venv/
+logs/*
+!logs/.gitkeep
+images/*
+!images/.gitkeep
