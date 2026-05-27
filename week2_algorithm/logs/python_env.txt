@@ -1,0 +1,21 @@
+===== python version =====
+Python 3.5.2
+===== python path =====
+/usr/bin/python
+/usr/bin/python3
+/usr/local/bin/pip3
+===== pip3 version =====
+===== cv2 python =====
+3.3.1-dev
+===== cv2 python3 =====
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: /opt/ros/kinetic/lib/python2.7/dist-packages/cv2.so: undefined symbol: PyCObject_Type
+===== cv_bridge python =====
+cv_bridge python ok
+===== cv_bridge python3 =====
+cv_bridge python3 ok
+===== mediapipe python3 =====
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: No module named 'mediapipe'

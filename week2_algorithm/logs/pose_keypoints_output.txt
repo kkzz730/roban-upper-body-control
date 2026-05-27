@@ -1,0 +1,8 @@
+image_path: /Users/zhangyixuan/roban_motion_control/week2/images/realsense_color_test.jpg
+visible: True
+reason: ok
+confidence: 0.9996
+right_shoulder: [302, 304]
+right_elbow: [203, 355]
+right_wrist: [226, 227]
+overlay_path: /Users/zhangyixuan/roban_motion_control/week2/images/pose_keypoints_overlay.jpg

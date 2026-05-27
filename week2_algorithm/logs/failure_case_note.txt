@@ -1,0 +1,15 @@
+failure case:
+第一次使用机器人 RealSense 水平摄像头原图进行姿态识别时，MediaPipe 能输出右肩、右肘、右腕坐标，但 visible=False，confidence=0.0618，reason=low visibility。
+
+possible reason:
+原图中右臂较模糊，人体姿态不够清晰，右肩、右肘、右腕关键点识别置信度较低。
+
+solution:
+重新采集机器人摄像头图像。拍摄时要求人正对机器人，距离约 1.5~2.5 米，完整露出头部、肩膀、右肘、右腕，右臂稍微离开身体并保持静止。重新采集后识别结果 visible=True，confidence=0.9996，可以用于后续角度计算。
+
+final valid result:
+right_shoulder: [302, 304]
+right_elbow: [203, 355]
+right_wrist: [226, 227]
+right_elbow_angle: 52.5580
+right_arm_raise_angle: 62.7447
