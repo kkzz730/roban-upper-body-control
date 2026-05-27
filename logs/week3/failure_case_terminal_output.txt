@@ -1,0 +1,10 @@
+failure / low-confidence test
+method: set min_visibility=1.01 to verify confidence filtering logic
+visible: False
+confidence: 0.999589
+reason: low visibility
+right_arm_raise_angle: None
+right_elbow_angle: None
+
+conclusion:
+When visible=False, angle fields are None and should not be used for robot control.

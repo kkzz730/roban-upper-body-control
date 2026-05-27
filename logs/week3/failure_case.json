@@ -1,0 +1,19 @@
+{
+  "visible": false,
+  "confidence": 0.9995885491371155,
+  "right_shoulder": [
+    302,
+    304
+  ],
+  "right_elbow": [
+    203,
+    355
+  ],
+  "right_wrist": [
+    226,
+    227
+  ],
+  "right_arm_raise_angle": null,
+  "right_elbow_angle": null,
+  "reason": "low visibility"
+}
