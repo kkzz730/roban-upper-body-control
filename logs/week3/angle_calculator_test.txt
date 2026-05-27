@@ -1,0 +1,2 @@
+right_elbow_angle: 135.0
+right_arm_raise_angle: 0.0

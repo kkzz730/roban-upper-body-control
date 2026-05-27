@@ -1,0 +1,21 @@
+===== week3 env check =====
+pwd:
+/Users/zhangyixuan/Program/roban_motion_control
+
+git branch:
+feat/pose-interface
+
+python3 version:
+Python 3.9.6
+
+python3 path:
+/usr/bin/python3
+
+opencv version:
+4.11.0
+
+mediapipe version:
+0.10.21
+
+numpy version:
+1.26.4
