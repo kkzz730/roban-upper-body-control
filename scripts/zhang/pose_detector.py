@@ -10,9 +10,6 @@ mp_pose = mp.solutions.pose
 
 
 def _landmark_to_pixel(landmark, image_width, image_height):
-    """
-    MediaPipe normalized landmark -> pixel coordinate.
-    """
     x = int(landmark.x * image_width)
     y = int(landmark.y * image_height)
     visibility = float(landmark.visibility)
@@ -20,11 +17,6 @@ def _landmark_to_pixel(landmark, image_width, image_height):
 
 
 def calculate_arm_raise_angle(shoulder, elbow):
-    """
-    计算手臂抬起角。
-    定义：上臂向量 shoulder->elbow 与图像竖直向下方向的夹角。
-    图像坐标中 y 轴向下，所以竖直向下向量为 [0, 1]。
-    """
     import math
     import numpy as np
 
@@ -43,47 +35,29 @@ def calculate_arm_raise_angle(shoulder, elbow):
     return math.degrees(math.acos(cos_angle))
 
 
-def detect_upper_body_angles(image_bgr, min_visibility=0.6):
-    """
-    输入：OpenCV BGR 图像
-    输出：左右上肢关键点、置信度与角度信息。
+def _build_invalid_result(reason, confidence=0.0):
+    return {
+        "visible": False,
+        "confidence": confidence,
+        "left_shoulder": None,
+        "left_elbow": None,
+        "left_wrist": None,
+        "right_shoulder": None,
+        "right_elbow": None,
+        "right_wrist": None,
+        "left_arm_raise_angle": None,
+        "left_elbow_angle": None,
+        "right_arm_raise_angle": None,
+        "right_elbow_angle": None,
+        "reason": reason
+    }
 
-    输出字段固定，供机器人端直接解析：
-    visible
-    confidence
-    left_arm_raise_angle
-    left_elbow_angle
-    right_arm_raise_angle
-    right_elbow_angle
-    """
+
+def _result_from_mediapipe(image_bgr, result, min_visibility=0.6):
     image_height, image_width = image_bgr.shape[:2]
-    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=1,
-        enable_segmentation=False,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    ) as pose:
-        result = pose.process(image_rgb)
 
     if not result.pose_landmarks:
-        return {
-            "visible": False,
-            "confidence": 0.0,
-            "left_shoulder": None,
-            "left_elbow": None,
-            "left_wrist": None,
-            "right_shoulder": None,
-            "right_elbow": None,
-            "right_wrist": None,
-            "left_arm_raise_angle": None,
-            "left_elbow_angle": None,
-            "right_arm_raise_angle": None,
-            "right_elbow_angle": None,
-            "reason": "no pose landmarks"
-        }
+        return _build_invalid_result("no pose landmarks", 0.0)
 
     landmarks = result.pose_landmarks.landmark
 
@@ -182,10 +156,45 @@ def detect_upper_body_angles(image_bgr, min_visibility=0.6):
     }
 
 
+def detect_upper_body_angles(image_bgr, min_visibility=0.6):
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+    with mp_pose.Pose(
+        static_image_mode=False,
+        model_complexity=1,
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    ) as pose:
+        result = pose.process(image_rgb)
+
+    return _result_from_mediapipe(image_bgr, result, min_visibility)
+
+
+class UpperBodyPoseDetector(object):
+    """
+    Persistent MediaPipe Pose detector for video stream.
+    Reusing this object reduces frame-to-frame jitter.
+    """
+    def __init__(self, min_detection_confidence=0.6, min_tracking_confidence=0.6):
+        self.pose = mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence
+        )
+
+    def detect(self, image_bgr, min_visibility=0.6):
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        result = self.pose.process(image_rgb)
+        return _result_from_mediapipe(image_bgr, result, min_visibility)
+
+    def close(self):
+        self.pose.close()
+
+
 def draw_pose_result_overlay(image_bgr, result):
-    """
-    绘制左右肩、肘、腕关键点、连线和角度文本。
-    """
     output = image_bgr.copy()
 
     if not result.get("visible", False):
@@ -211,14 +220,12 @@ def draw_pose_result_overlay(image_bgr, result):
     right_elbow = tuple(result["right_elbow"])
     right_wrist = tuple(result["right_wrist"])
 
-    # left arm
     cv2.circle(output, left_shoulder, 6, (0, 255, 0), -1)
     cv2.circle(output, left_elbow, 6, (0, 255, 0), -1)
     cv2.circle(output, left_wrist, 6, (0, 255, 0), -1)
     cv2.line(output, left_shoulder, left_elbow, (255, 0, 0), 2)
     cv2.line(output, left_elbow, left_wrist, (255, 0, 0), 2)
 
-    # right arm
     cv2.circle(output, right_shoulder, 6, (0, 255, 0), -1)
     cv2.circle(output, right_elbow, 6, (0, 255, 0), -1)
     cv2.circle(output, right_wrist, 6, (0, 255, 0), -1)
