@@ -219,10 +219,10 @@ def callback(msg):
         print("Generated upper-body frame:", target_frame)
         print("Frame length:", len(target_frame))
 
-        # Do not move back to BASE_FRAME before every action.
-        # Otherwise the robot arm will repeatedly retract and expand.
         frames = [
+            (BASE_FRAME, 800, 1200),
             (target_frame, 1200, 2500),
+            (BASE_FRAME, 1200, 1500),
         ]
 
         busy = True
