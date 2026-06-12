@@ -169,11 +169,27 @@ For the real Mac pose pipeline instead of fake poses:
 MODE=real scripts/yang/start_week4_servo_debug_tmux.sh
 ```
 
+The default debug script is set up for the first hardware check where the person raises the right arm and the left arm should stay still:
+
+```text
+POSE_MODE=right-only
+ENABLED_ARMS=right
+```
+
+In this mode fake JSON only changes the right-arm angles, and the controller only overwrites the robot right shoulder and right elbow. The left arm keeps the startup servo angles read from `/MediumSize/BodyHub/ServoPositions`.
+
+For both-arm control:
+
+```bash
+ENABLED_ARMS=both POSE_MODE=both scripts/yang/start_week4_servo_debug_tmux.sh
+```
+
 Useful overrides:
 
 ```bash
 JOINT_TOPIC=/actual/JointControlPoint/topic \
 JOINT_IDS=14,15,17,18 \
+ENABLED_ARMS=right \
 SERVO_HZ=100 \
 POSE_HZ=30 \
 scripts/yang/start_week4_servo_debug_tmux.sh

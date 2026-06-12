@@ -11,6 +11,8 @@ MODE="${MODE:-fake}"
 INPUT_TOPIC="${INPUT_TOPIC:-/upper_body_pose_angles}"
 JOINT_TOPIC="${JOINT_TOPIC:-/MediumSize/BodyHub/MotoPosition}"
 JOINT_IDS="${JOINT_IDS:-14,15,17,18}"
+ENABLED_ARMS="${ENABLED_ARMS:-right}"
+POSE_MODE="${POSE_MODE:-right-only}"
 
 POSE_HZ="${POSE_HZ:-30}"
 SERVO_HZ="${SERVO_HZ:-100}"
@@ -48,7 +50,7 @@ fi
 COMMON_CMD="cd $(quote "$REPO_DIR") && source $(quote "$SETUP_BASH")"
 
 if [ "$MODE" = "fake" ]; then
-    POSE_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/fake_pose_high_rate_publisher.py --topic $(quote "$INPUT_TOPIC") --hz $(quote "$POSE_HZ")"
+    POSE_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/fake_pose_high_rate_publisher.py --topic $(quote "$INPUT_TOPIC") --hz $(quote "$POSE_HZ") --mode $(quote "$POSE_MODE")"
 elif [ "$MODE" = "real" ]; then
     POSE_CMD="$COMMON_CMD && echo 'Waiting for real pose input on $INPUT_TOPIC' && rostopic hz $(quote "$INPUT_TOPIC")"
 else
@@ -56,7 +58,7 @@ else
     exit 1
 fi
 
-CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
+CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
 RATE_CMD="$COMMON_CMD && echo 'Measuring JointControlPoint publish rate on $JOINT_TOPIC' && rostopic hz $(quote "$JOINT_TOPIC")"
 
 tmux new-session -d -s "$SESSION" -n week4 -c "$REPO_DIR"
@@ -72,7 +74,7 @@ tmux select-pane -t "$SESSION:0.1"
 tmux select-layout -t "$SESSION:0" tiled >/dev/null
 
 echo "Started tmux session: $SESSION"
-echo "Pane 1: pose input, MODE=$MODE"
-echo "Pane 2: 100Hz servo controller"
+echo "Pane 1: pose input, MODE=$MODE POSE_MODE=$POSE_MODE"
+echo "Pane 2: 100Hz servo controller, ENABLED_ARMS=$ENABLED_ARMS"
 echo "Pane 3: rostopic hz for $JOINT_TOPIC"
 exec tmux attach-session -t "$SESSION"

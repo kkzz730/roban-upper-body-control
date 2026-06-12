@@ -45,6 +45,12 @@ DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
 DEFAULT_CONTROL_HZ = 100.0
 DEFAULT_MAX_STEP_DEG = 0.6
 
+ARM_JOINTS = {
+    "left": ["left_shoulder", "left_elbow"],
+    "right": ["right_shoulder", "right_elbow"],
+    "both": JOINT_NAMES[:],
+}
+
 
 class TargetState(object):
     def __init__(self):
@@ -278,6 +284,7 @@ class ServoUpperBodyController(object):
         self.args = args
         self.joint_ids = joint_ids
         self.joint_limits = joint_limits
+        self.enabled_joint_names = ARM_JOINTS[args.enabled_arms]
         self.state = TargetState()
         self.current_angles = BASE_ANGLES.copy()
         self.running = True
@@ -374,21 +381,21 @@ class ServoUpperBodyController(object):
         return snapshot["target_angles"].copy(), True, snapshot
 
     def smooth_current_angles(self, target):
-        for name in JOINT_NAMES:
+        for name in self.enabled_joint_names:
             filtered = low_pass(self.current_angles[name], target[name], self.args.alpha)
             limited = slew_limit(self.current_angles[name], filtered, self.args.max_step_deg)
             low, high = self.joint_limits[name]
             self.current_angles[name] = clamp(limited, low, high)
 
     def publish_current_angles(self):
-        joint_id_list = [self.joint_ids[name] for name in JOINT_NAMES]
+        joint_id_list = [self.joint_ids[name] for name in self.enabled_joint_names]
         time_from_start = 1.0 / max(1.0, self.args.hz)
 
         if self.supports_joint_ids:
-            angle_list = [self.current_angles[name] for name in JOINT_NAMES]
+            angle_list = [self.current_angles[name] for name in self.enabled_joint_names]
         else:
             angle_list = self.full_position_frame[:]
-            for name in JOINT_NAMES:
+            for name in self.enabled_joint_names:
                 index = self.joint_ids[name] - 1
                 if not 0 <= index < len(angle_list):
                     raise RuntimeError(
@@ -427,7 +434,7 @@ class ServoUpperBodyController(object):
             self.current_angles["right_shoulder"],
             self.current_angles["right_elbow"],
             self.args.joint_topic,
-            [self.joint_ids[name] for name in JOINT_NAMES],
+            [self.joint_ids[name] for name in self.enabled_joint_names],
         )
 
     def control_loop(self):
@@ -460,6 +467,12 @@ def build_arg_parser():
         help="Four IDs in left_shoulder,left_elbow,right_shoulder,right_elbow order.",
     )
     parser.add_argument("--hz", type=float, default=DEFAULT_CONTROL_HZ, help="Servo publish frequency.")
+    parser.add_argument(
+        "--enabled-arms",
+        choices=["left", "right", "both"],
+        default="both",
+        help="Which arm targets to publish. Disabled arms keep their startup servo angles.",
+    )
     parser.add_argument("--confidence-threshold", type=float, default=0.85, help="Minimum pose confidence.")
     parser.add_argument("--stale-timeout", type=float, default=0.6, help="Seconds before pose data is stale.")
     parser.add_argument("--alpha", type=float, default=0.25, help="Low-pass filter coefficient.")
@@ -492,6 +505,7 @@ def main():
     rospy.loginfo("Week4 servo upper-body controller started.")
     rospy.loginfo("Subscribing topic: %s", args.input_topic)
     rospy.loginfo("Publishing topic: %s", args.joint_topic)
+    rospy.loginfo("Enabled arms: %s", args.enabled_arms)
     rospy.loginfo("JointControlPoint fields: %s", getattr(probe_msg, "__slots__", []))
     rospy.loginfo("Joint ID field supported: %s", controller.supports_joint_ids)
     rospy.loginfo("mainControlID=%s", controller.control_id)
