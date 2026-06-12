@@ -19,6 +19,7 @@ POSE_HZ="${POSE_HZ:-30}"
 SERVO_HZ="${SERVO_HZ:-100}"
 CONFIDENCE_THRESHOLD="${CONFIDENCE_THRESHOLD:-0.85}"
 STALE_TIMEOUT="${STALE_TIMEOUT:-0.6}"
+SOURCE_STALE_TIMEOUT="${SOURCE_STALE_TIMEOUT:-2.0}"
 ALPHA="${ALPHA:-0.25}"
 MAX_STEP_DEG="${MAX_STEP_DEG:-0.6}"
 
@@ -45,7 +46,10 @@ fi
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "Attaching existing tmux session: $SESSION"
-    exec tmux attach-session -t "$SESSION"
+    if [ -t 0 ] && [ -t 1 ]; then
+        exec tmux attach-session -t "$SESSION"
+    fi
+    exit 0
 fi
 
 COMMON_CMD="cd $(quote "$REPO_DIR") && source $(quote "$SETUP_BASH")"
@@ -59,7 +63,7 @@ else
     exit 1
 fi
 
-CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
+CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --source-stale-timeout $(quote "$SOURCE_STALE_TIMEOUT") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
 RATE_CMD="$COMMON_CMD && echo 'Measuring JointControlPoint publish rate on $JOINT_TOPIC' && rostopic hz $(quote "$JOINT_TOPIC")"
 
 tmux new-session -d -s "$SESSION" -n week4 -c "$REPO_DIR"
@@ -78,4 +82,6 @@ echo "Started tmux session: $SESSION"
 echo "Pane 1: pose input, MODE=$MODE POSE_MODE=$POSE_MODE"
 echo "Pane 2: 100Hz servo controller, ENABLED_ARMS=$ENABLED_ARMS CONTROL_ID=$CONTROL_ID"
 echo "Pane 3: rostopic hz for $JOINT_TOPIC"
-exec tmux attach-session -t "$SESSION"
+if [ -t 0 ] && [ -t 1 ]; then
+    exec tmux attach-session -t "$SESSION"
+fi
