@@ -15,13 +15,17 @@ from std_msgs.msg import String
 
 JOINT_NAMES = ["left_shoulder", "left_elbow", "right_shoulder", "right_elbow"]
 
-BASE_FRAME = [0,0,0,0,0,0,0,0,0,0,0,0,0,-61,-18,0,61,18,0,0,0,0]
+BASE_FRAME = [
+    0.0, -1.81067, 19.2848, -34.5006, -15.2158, -1.81067,
+    0.0, 1.81067, -19.2848, 34.5006, 15.2158, 1.81067,
+    0.0, -70.0, -15.0, 0.0, 70.0, 15.0, 0.0, 0.0, 0.0, 0.0,
+]
 
 BASE_ANGLES = {
-    "left_shoulder": -61.0,
-    "left_elbow": -18.0,
-    "right_shoulder": 61.0,
-    "right_elbow": 18.0,
+    "left_shoulder": -70.0,
+    "left_elbow": -15.0,
+    "right_shoulder": 70.0,
+    "right_elbow": 15.0,
 }
 
 DEFAULT_JOINT_IDS = {
@@ -131,7 +135,8 @@ def extract_source_timestamp(pose):
     return timestamp
 
 
-def pose_to_target_angles(pose, limits):
+def pose_to_target_angles(pose, limits, home_angles=None):
+    home = home_angles or BASE_ANGLES
     left_raise = parse_required_float(pose, "left_arm_raise_angle")
     left_elbow = parse_required_float(pose, "left_elbow_angle")
     right_raise = parse_required_float(pose, "right_arm_raise_angle")
@@ -146,10 +151,10 @@ def pose_to_target_angles(pose, limits):
     right_elbow_delta = map_range(right_elbow_bend, 0.0, 120.0, 0.0, 35.0)
 
     target = {
-        "left_shoulder": BASE_ANGLES["left_shoulder"] + left_shoulder_delta,
-        "right_shoulder": BASE_ANGLES["right_shoulder"] - right_shoulder_delta,
-        "left_elbow": BASE_ANGLES["left_elbow"] - left_elbow_delta,
-        "right_elbow": BASE_ANGLES["right_elbow"] + right_elbow_delta,
+        "left_shoulder": home["left_shoulder"] + left_shoulder_delta,
+        "right_shoulder": home["right_shoulder"] - right_shoulder_delta,
+        "left_elbow": home["left_elbow"] - left_elbow_delta,
+        "right_elbow": home["right_elbow"] + right_elbow_delta,
     }
 
     return clamp_angles(target, limits)
@@ -367,12 +372,16 @@ class ServoUpperBodyController(object):
         self.enabled_joint_names = ARM_JOINTS[args.enabled_arms]
         self.state = TargetState()
         self.current_angles = BASE_ANGLES.copy()
+        self.home_angles = BASE_ANGLES.copy()
         self.running = True
         self.last_log_time = 0.0
         self.last_stale_warning_time = 0.0
         self.last_bodyhub_check_time = 0.0
         self.last_bodyhub_warning_time = 0.0
         self.last_bodyhub_signature = None
+        self.in_valid_segment = False
+        self.pre_action_home_until = 0.0
+        self.shutdown_started = False
         self.control_id = get_main_control_id(args)
         if args.prepare_bodyhub:
             prepare_bodyhub(args, self.control_id)
@@ -422,7 +431,7 @@ class ServoUpperBodyController(object):
             pose = json.loads(msg.data)
         except Exception as err:
             rospy.logwarn("Invalid pose JSON: %s", err)
-            self.state.update(False, 0.0, {}, BASE_ANGLES)
+            self.state.update(False, 0.0, {}, self.home_angles)
             return
 
         visible = bool(pose.get("visible", False))
@@ -432,14 +441,18 @@ class ServoUpperBodyController(object):
             confidence = 0.0
 
         if not visible or confidence < self.args.confidence_threshold:
-            self.state.update(visible, confidence, pose, BASE_ANGLES)
+            self.state.update(visible, confidence, pose, self.home_angles)
             return
 
         try:
-            target_angles = pose_to_target_angles(pose, self.joint_limits)
+            target_angles = pose_to_target_angles(
+                pose,
+                self.joint_limits,
+                self.home_angles,
+            )
         except Exception as err:
             rospy.logwarn("Could not map pose to target angles: %s", err)
-            self.state.update(False, confidence, pose, BASE_ANGLES)
+            self.state.update(False, confidence, pose, self.home_angles)
             return
 
         self.state.update(visible, confidence, pose, target_angles)
@@ -472,12 +485,36 @@ class ServoUpperBodyController(object):
                     now - source_timestamp if source_timestamp > 0.0 else -1.0,
                 )
                 self.last_stale_warning_time = now
-            return BASE_ANGLES.copy(), False, snapshot
+            return self.home_angles.copy(), False, snapshot
 
         if not valid:
-            return BASE_ANGLES.copy(), False, snapshot
+            return self.home_angles.copy(), False, snapshot
 
         return snapshot["target_angles"].copy(), True, snapshot
+
+    def apply_action_home_policy(self, target, valid):
+        now = time.time()
+
+        if valid:
+            if not self.in_valid_segment:
+                self.in_valid_segment = True
+                self.pre_action_home_until = now + self.args.pre_action_home_duration
+                rospy.loginfo(
+                    "New valid pose segment; holding home for %.2fs before following.",
+                    self.args.pre_action_home_duration,
+                )
+
+            if now < self.pre_action_home_until:
+                return self.home_angles.copy(), False
+
+            return target, True
+
+        if self.in_valid_segment:
+            rospy.loginfo("Pose segment ended; returning to home.")
+            self.in_valid_segment = False
+            self.pre_action_home_until = 0.0
+
+        return self.home_angles.copy(), False
 
     def smooth_current_angles(self, target):
         for name in self.enabled_joint_names:
@@ -588,6 +625,7 @@ class ServoUpperBodyController(object):
         rate = rospy.Rate(self.args.hz)
         while not rospy.is_shutdown() and self.running:
             target, valid, snapshot = self.get_control_target()
+            target, valid = self.apply_action_home_policy(target, valid)
             self.smooth_current_angles(target)
             self.keep_bodyhub_ready()
             self.publish_current_angles()
@@ -595,7 +633,21 @@ class ServoUpperBodyController(object):
             rate.sleep()
 
     def shutdown(self):
+        if self.shutdown_started:
+            self.running = False
+            return
+        self.shutdown_started = True
         self.running = False
+        if not hasattr(self, "publisher"):
+            return
+
+        deadline = time.time() + self.args.shutdown_home_duration
+        interval = 1.0 / max(1.0, self.args.hz)
+        while time.time() < deadline:
+            self.smooth_current_angles(self.home_angles)
+            self.keep_bodyhub_ready()
+            self.publish_current_angles()
+            time.sleep(interval)
 
 
 def build_arg_parser():
@@ -624,6 +676,8 @@ def build_arg_parser():
     parser.add_argument("--confidence-threshold", type=float, default=0.85, help="Minimum pose confidence.")
     parser.add_argument("--stale-timeout", type=float, default=0.6, help="Seconds before pose data is stale.")
     parser.add_argument("--source-stale-timeout", type=float, default=2.0, help="Seconds before pose JSON timestamp is stale.")
+    parser.add_argument("--pre-action-home-duration", type=float, default=1.0, help="Seconds to hold home before following a fresh valid pose segment.")
+    parser.add_argument("--shutdown-home-duration", type=float, default=1.5, help="Seconds to publish home during controller shutdown.")
     parser.add_argument("--alpha", type=float, default=0.25, help="Low-pass filter coefficient.")
     parser.add_argument("--max-step-deg", type=float, default=DEFAULT_MAX_STEP_DEG, help="Max per-cycle angle step in degrees.")
     parser.add_argument(
@@ -651,6 +705,8 @@ def main():
     args.hz = max(1.0, args.hz)
     args.bodyhub_check_interval = max(0.2, args.bodyhub_check_interval)
     args.source_stale_timeout = max(args.stale_timeout, args.source_stale_timeout)
+    args.pre_action_home_duration = max(0.0, args.pre_action_home_duration)
+    args.shutdown_home_duration = max(0.0, args.shutdown_home_duration)
 
     rospy.init_node("week4_servo_upper_body_controller", anonymous=True)
 
