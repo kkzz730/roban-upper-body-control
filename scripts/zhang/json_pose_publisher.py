@@ -12,6 +12,7 @@ from std_msgs.msg import String
 JSON_PATH = "/home/lemon/roban_motion_control/week4/logs/upper_body_pose_angles.json"
 OUTPUT_TOPIC = "/upper_body_pose_angles"
 PUBLISH_HZ = 20.0
+FILE_STALE_TIMEOUT = 1.0
 
 
 class JsonPosePublisher(object):
@@ -51,6 +52,13 @@ class JsonPosePublisher(object):
 
         try:
             mtime = os.path.getmtime(JSON_PATH)
+            now = time.time()
+
+            if now - mtime > FILE_STALE_TIMEOUT:
+                return json.dumps(
+                    self.build_invalid_json("json file stale"),
+                    ensure_ascii=False
+                )
 
             with open(JSON_PATH, "r") as f:
                 data = json.load(f)

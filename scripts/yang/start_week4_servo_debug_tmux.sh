@@ -19,7 +19,6 @@ POSE_HZ="${POSE_HZ:-30}"
 SERVO_HZ="${SERVO_HZ:-100}"
 CONFIDENCE_THRESHOLD="${CONFIDENCE_THRESHOLD:-0.85}"
 STALE_TIMEOUT="${STALE_TIMEOUT:-0.6}"
-SOURCE_STALE_TIMEOUT="${SOURCE_STALE_TIMEOUT:-2.0}"
 PRE_ACTION_HOME_DURATION="${PRE_ACTION_HOME_DURATION:-0.3}"
 SHUTDOWN_HOME_DURATION="${SHUTDOWN_HOME_DURATION:-1.5}"
 HOME_TOLERANCE_DEG="${HOME_TOLERANCE_DEG:-2.0}"
@@ -66,8 +65,8 @@ else
     exit 1
 fi
 
-CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --source-stale-timeout $(quote "$SOURCE_STALE_TIMEOUT") --pre-action-home-duration $(quote "$PRE_ACTION_HOME_DURATION") --shutdown-home-duration $(quote "$SHUTDOWN_HOME_DURATION") --home-tolerance-deg $(quote "$HOME_TOLERANCE_DEG") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
-RATE_CMD="$COMMON_CMD && echo 'Measuring JointControlPoint publish rate on $JOINT_TOPIC' && rostopic hz $(quote "$JOINT_TOPIC")"
+CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --pre-action-home-duration $(quote "$PRE_ACTION_HOME_DURATION") --shutdown-home-duration $(quote "$SHUTDOWN_HOME_DURATION") --home-tolerance-deg $(quote "$HOME_TOLERANCE_DEG") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
+MONITOR_CMD="$COMMON_CMD && while true; do clear; date; echo 'Latest pose input on $INPUT_TOPIC'; timeout 1 rostopic echo -n 1 $(quote "$INPUT_TOPIC") || true; sleep 0.5; done"
 
 tmux new-session -d -s "$SESSION" -n week4 -c "$REPO_DIR"
 tmux send-keys -t "$SESSION:0.0" "$POSE_CMD" C-m
@@ -76,7 +75,7 @@ tmux split-window -h -t "$SESSION:0.0" -c "$REPO_DIR"
 tmux send-keys -t "$SESSION:0.1" "$CONTROLLER_CMD" C-m
 
 tmux split-window -v -t "$SESSION:0.1" -c "$REPO_DIR"
-tmux send-keys -t "$SESSION:0.2" "$RATE_CMD" C-m
+tmux send-keys -t "$SESSION:0.2" "$MONITOR_CMD" C-m
 
 tmux select-pane -t "$SESSION:0.1"
 tmux select-layout -t "$SESSION:0" tiled >/dev/null
@@ -84,7 +83,7 @@ tmux select-layout -t "$SESSION:0" tiled >/dev/null
 echo "Started tmux session: $SESSION"
 echo "Pane 1: pose input, MODE=$MODE POSE_MODE=$POSE_MODE"
 echo "Pane 2: 100Hz servo controller, ENABLED_ARMS=$ENABLED_ARMS CONTROL_ID=$CONTROL_ID"
-echo "Pane 3: rostopic hz for $JOINT_TOPIC"
+echo "Pane 3: live input monitor for $INPUT_TOPIC"
 if [ -t 0 ] && [ -t 1 ]; then
     exec tmux attach-session -t "$SESSION"
 fi
