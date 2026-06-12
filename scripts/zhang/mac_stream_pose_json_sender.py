@@ -155,7 +155,7 @@ def main():
     parser.add_argument(
         "--hz",
         type=float,
-        default=2.0,
+        default=5.0,
         help="pose recognition and JSON upload frequency"
     )
     parser.add_argument(

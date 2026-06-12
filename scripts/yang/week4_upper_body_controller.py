@@ -7,12 +7,8 @@ import json
 import time
 from std_msgs.msg import String
 
-# Stable base frame read from BodyHub ServoPositions on the current robot.
-BASE_FRAME = [
-    0.0, -1.81067, 19.2848, -34.5006, -15.2158, -1.81067,
-    0.0, 1.81067, -19.2848, 34.5006, 15.2158, 1.81067,
-    0.0, -70.0, -15.0, 0.0, 70.0, 15.0, 0.0, 0.0, 0.0, 0.0,
-]
+# Stable base frame from previous verified Roban action scripts.
+BASE_FRAME = [0,0,0,0,0,0,0,0,0,0,0,0,0,-61,-18,0,61,18,0,0,0,0]
 
 # Conservative upper-body joint indices based on previous action-frame tests.
 LEFT_SHOULDER_IDX = 13
@@ -223,10 +219,10 @@ def callback(msg):
         print("Generated upper-body frame:", target_frame)
         print("Frame length:", len(target_frame))
 
+        # Do not move back to BASE_FRAME before every action.
+        # Otherwise the robot arm will repeatedly retract and expand.
         frames = [
-            (BASE_FRAME, 800, 1200),
             (target_frame, 1200, 2500),
-            (BASE_FRAME, 1200, 1500),
         ]
 
         busy = True
