@@ -44,6 +44,7 @@ DEFAULT_SERVO_POSITION_TOPIC = "/MediumSize/BodyHub/ServoPositions"
 DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
 DEFAULT_CONTROL_HZ = 100.0
 DEFAULT_MAX_STEP_DEG = 0.6
+DEFAULT_CONTROL_ID = 2
 
 ARM_JOINTS = {
     "left": ["left_shoulder", "left_elbow"],
@@ -259,24 +260,89 @@ def extract_control_id(response):
     return 0
 
 
-def get_main_control_id(service_name, explicit_control_id=None):
-    if explicit_control_id is not None:
-        return int(explicit_control_id)
-
+def get_bodyhub_control_id(service_name):
     try:
-        from bodyhub.srv import GetMasterID
+        from bodyhub.srv import SrvTLSstring
     except Exception as err:
-        rospy.logwarn("Could not import bodyhub.srv.GetMasterID: %s. Using control id 0.", err)
+        rospy.logwarn("Could not import bodyhub.srv.SrvTLSstring: %s.", err)
         return 0
 
     try:
         rospy.wait_for_service(service_name, timeout=3.0)
-        proxy = rospy.ServiceProxy(service_name, GetMasterID)
-        response = proxy()
+        proxy = rospy.ServiceProxy(service_name, SrvTLSstring)
+        response = proxy("get")
         return extract_control_id(response)
     except Exception as err:
-        rospy.logwarn("Could not call %s: %s. Using control id 0.", service_name, err)
+        rospy.logwarn("Could not call %s: %s.", service_name, err)
         return 0
+
+
+def get_bodyhub_status(status_service):
+    try:
+        from bodyhub.srv import SrvString
+    except Exception as err:
+        rospy.logwarn("Could not import bodyhub.srv.SrvString: %s.", err)
+        return None
+
+    try:
+        rospy.wait_for_service(status_service, timeout=3.0)
+        proxy = rospy.ServiceProxy(status_service, SrvString)
+        response = proxy("get")
+        return response.data
+    except Exception as err:
+        rospy.logwarn("Could not call %s: %s.", status_service, err)
+        return None
+
+
+def set_bodyhub_status(state_service, control_id, state):
+    try:
+        from bodyhub.srv import SrvState
+    except Exception as err:
+        rospy.logwarn("Could not import bodyhub.srv.SrvState: %s.", err)
+        return None
+
+    try:
+        rospy.wait_for_service(state_service, timeout=3.0)
+        proxy = rospy.ServiceProxy(state_service, SrvState)
+        response = proxy(int(control_id), state)
+        return response.stateRes
+    except Exception as err:
+        rospy.logwarn("Could not call %s %s: %s.", state_service, state, err)
+        return None
+
+
+def prepare_bodyhub(args, control_id):
+    current_id = get_bodyhub_control_id(args.service)
+    status = get_bodyhub_status(args.status_service)
+    rospy.loginfo("BodyHub before prepare: status=%s currentControlID=%s", status, current_id)
+
+    if current_id not in (0, int(control_id)):
+        rospy.logwarn(
+            "BodyHub appears busy with control id %s; requested id is %s.",
+            current_id,
+            control_id,
+        )
+
+    if status in ("ready", "running", "pause"):
+        return True
+
+    if status == "preReady":
+        result = set_bodyhub_status(args.state_service, control_id, "setStatus")
+        rospy.loginfo("StateJump setStatus result=%s", result)
+        return result in (22, 23)
+
+    rospy.logwarn("BodyHub status %s is not prepared automatically.", status)
+    return False
+
+
+def get_main_control_id(args):
+    if args.control_id is not None:
+        return int(args.control_id)
+
+    control_id = get_bodyhub_control_id(args.service)
+    if control_id == 0 and args.default_control_id:
+        return int(args.default_control_id)
+    return control_id
 
 
 class ServoUpperBodyController(object):
@@ -290,7 +356,9 @@ class ServoUpperBodyController(object):
         self.running = True
         self.last_log_time = 0.0
         self.last_stale_warning_time = 0.0
-        self.control_id = get_main_control_id(args.service, args.control_id)
+        self.control_id = get_main_control_id(args)
+        if args.prepare_bodyhub:
+            prepare_bodyhub(args, self.control_id)
         self.publisher = rospy.Publisher(args.joint_topic, JointControlPoint, queue_size=10)
         self.supports_joint_ids = joint_control_supports_joint_ids()
         self.full_position_frame = None
@@ -491,7 +559,12 @@ def build_arg_parser():
         help="Optional limits like left_shoulder:-100:20,left_elbow:-70:30.",
     )
     parser.add_argument("--service", default=DEFAULT_SERVICE, help="GetMasterID service name.")
+    parser.add_argument("--status-service", default="/MediumSize/BodyHub/GetStatus", help="BodyHub status service name.")
+    parser.add_argument("--state-service", default="/MediumSize/BodyHub/StateJump", help="BodyHub state transition service name.")
     parser.add_argument("--control-id", type=int, default=None, help="Override mainControlID instead of calling service.")
+    parser.add_argument("--default-control-id", type=int, default=DEFAULT_CONTROL_ID, help="Control ID used when BodyHub reports 0.")
+    parser.add_argument("--prepare-bodyhub", action="store_true", default=True, help="Set BodyHub to ready when it is preReady.")
+    parser.add_argument("--no-prepare-bodyhub", action="store_false", dest="prepare_bodyhub", help="Do not change BodyHub state at startup.")
     return parser
 
 

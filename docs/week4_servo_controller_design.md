@@ -178,6 +178,14 @@ ENABLED_ARMS=both
 
 During a real-camera test where the person raises only the right arm, the controller should still run in both-arm mode. The expected evidence is in the logs: `right_arm_raise_angle` should change, while `left_arm_raise_angle` should stay mostly stable. If the person raises the left arm later, the left arm should follow too.
 
+The controller prepares BodyHub at startup with control id `2`, matching the existing Roban examples. If BodyHub is `preReady`, it calls:
+
+```bash
+rosservice call /MediumSize/BodyHub/StateJump 2 setStatus
+```
+
+Then it publishes `mainControlID=2`. Without this state transition, `/MediumSize/BodyHub/MotoPosition` messages can appear at 100Hz while the robot still does not execute them.
+
 For a fake right-arm-only log check without disabling real both-arm capability:
 
 ```bash
@@ -190,6 +198,7 @@ Useful overrides:
 JOINT_TOPIC=/actual/JointControlPoint/topic \
 JOINT_IDS=14,15,17,18 \
 ENABLED_ARMS=both \
+CONTROL_ID=2 \
 SERVO_HZ=100 \
 POSE_HZ=30 \
 scripts/yang/start_week4_servo_debug_tmux.sh

@@ -14,6 +14,7 @@ from bodyhub.msg import ServoPositionAngle
 DEFAULT_TOPIC = "/MediumSize/BodyHub/MotoPosition"
 DEFAULT_SERVO_POSITION_TOPIC = "/MediumSize/BodyHub/ServoPositions"
 DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
+DEFAULT_CONTROL_ID = 2
 MAX_DEFAULT_AMPLITUDE = 8.0
 BASE_FRAME = [0,0,0,0,0,0,0,0,0,0,0,0,0,-61,-18,0,61,18,0,0,0,0]
 
@@ -138,19 +139,22 @@ def get_main_control_id(service_name, explicit_control_id=None):
         return int(explicit_control_id)
 
     try:
-        from bodyhub.srv import GetMasterID
+        from bodyhub.srv import SrvTLSstring
     except Exception as err:
-        rospy.logwarn("Could not import bodyhub.srv.GetMasterID: %s. Using control id 0.", err)
-        return 0
+        rospy.logwarn("Could not import bodyhub.srv.SrvTLSstring: %s. Using control id %s.", err, DEFAULT_CONTROL_ID)
+        return DEFAULT_CONTROL_ID
 
     try:
         rospy.wait_for_service(service_name, timeout=3.0)
-        proxy = rospy.ServiceProxy(service_name, GetMasterID)
-        response = proxy()
-        return extract_control_id(response)
+        proxy = rospy.ServiceProxy(service_name, SrvTLSstring)
+        response = proxy("get")
+        control_id = extract_control_id(response)
+        if control_id == 0:
+            return DEFAULT_CONTROL_ID
+        return control_id
     except Exception as err:
-        rospy.logwarn("Could not call %s: %s. Using control id 0.", service_name, err)
-    return 0
+        rospy.logwarn("Could not call %s: %s. Using control id %s.", service_name, err, DEFAULT_CONTROL_ID)
+        return DEFAULT_CONTROL_ID
 
 
 def build_angle_payload(joint_id, angle, supports_joint_ids, full_position_frame):
