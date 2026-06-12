@@ -9,10 +9,13 @@ import time
 
 import rospy
 from bodyhub.msg import JointControlPoint
+from bodyhub.msg import ServoPositionAngle
 from std_msgs.msg import String
 
 
 JOINT_NAMES = ["left_shoulder", "left_elbow", "right_shoulder", "right_elbow"]
+
+BASE_FRAME = [0,0,0,0,0,0,0,0,0,0,0,0,0,-61,-18,0,61,18,0,0,0,0]
 
 BASE_ANGLES = {
     "left_shoulder": -61.0,
@@ -36,7 +39,8 @@ JOINT_LIMITS = {
 }
 
 DEFAULT_INPUT_TOPIC = "/upper_body_pose_angles"
-DEFAULT_JOINT_TOPIC = "/MediumSize/BodyHub/JointPosition"
+DEFAULT_JOINT_TOPIC = "/MediumSize/BodyHub/MotoPosition"
+DEFAULT_SERVO_POSITION_TOPIC = "/MediumSize/BodyHub/ServoPositions"
 DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
 DEFAULT_CONTROL_HZ = 100.0
 DEFAULT_MAX_STEP_DEG = 0.6
@@ -185,7 +189,24 @@ def set_message_field(msg, field_names, values):
     return None
 
 
-def build_joint_control_message(joint_ids, angles, control_id):
+def joint_control_supports_joint_ids():
+    msg = JointControlPoint()
+    return any(
+        hasattr(msg, field_name)
+        for field_name in [
+            "jointIdList",
+            "jointIDList",
+            "jointIds",
+            "jointIDs",
+            "idList",
+            "ids",
+            "jointId",
+            "jointID",
+        ]
+    )
+
+
+def build_joint_control_message(joint_ids, angles, control_id, time_from_start=None):
     msg = JointControlPoint()
     id_field = set_message_field(
         msg,
@@ -202,6 +223,8 @@ def build_joint_control_message(joint_ids, angles, control_id):
         ["mainControlID", "mainControlId", "main_control_id", "controlID", "controlId"],
         [int(control_id)],
     )
+    if time_from_start is not None and hasattr(msg, "time_from_start"):
+        msg.time_from_start = rospy.Duration.from_sec(float(time_from_start))
 
     if angle_field is None:
         raise RuntimeError(
@@ -262,6 +285,45 @@ class ServoUpperBodyController(object):
         self.last_stale_warning_time = 0.0
         self.control_id = get_main_control_id(args.service, args.control_id)
         self.publisher = rospy.Publisher(args.joint_topic, JointControlPoint, queue_size=10)
+        self.supports_joint_ids = joint_control_supports_joint_ids()
+        self.full_position_frame = None
+
+        if not self.supports_joint_ids:
+            self.full_position_frame = self.load_initial_full_position_frame()
+            self.initialize_current_angles_from_frame(self.full_position_frame)
+
+    def load_initial_full_position_frame(self):
+        try:
+            msg = rospy.wait_for_message(
+                self.args.servo_position_topic,
+                ServoPositionAngle,
+                timeout=2.0,
+            )
+            frame = [float(value) for value in msg.angle]
+            if len(frame) >= max(self.joint_ids.values()):
+                rospy.loginfo(
+                    "Using current servo frame from %s, length=%d",
+                    self.args.servo_position_topic,
+                    len(frame),
+                )
+                return frame
+            rospy.logwarn(
+                "Servo position frame from %s is too short: length=%d",
+                self.args.servo_position_topic,
+                len(frame),
+            )
+        except Exception as err:
+            rospy.logwarn("Could not read initial servo positions: %s", err)
+
+        rospy.logwarn("Falling back to static BASE_FRAME for full-position publish mode.")
+        return BASE_FRAME[:]
+
+    def initialize_current_angles_from_frame(self, frame):
+        for name in JOINT_NAMES:
+            index = self.joint_ids[name] - 1
+            if 0 <= index < len(frame):
+                low, high = self.joint_limits[name]
+                self.current_angles[name] = clamp(float(frame[index]), low, high)
 
     def pose_callback(self, msg):
         try:
@@ -320,10 +382,28 @@ class ServoUpperBodyController(object):
 
     def publish_current_angles(self):
         joint_id_list = [self.joint_ids[name] for name in JOINT_NAMES]
-        angle_list = [self.current_angles[name] for name in JOINT_NAMES]
+        time_from_start = 1.0 / max(1.0, self.args.hz)
+
+        if self.supports_joint_ids:
+            angle_list = [self.current_angles[name] for name in JOINT_NAMES]
+        else:
+            angle_list = self.full_position_frame[:]
+            for name in JOINT_NAMES:
+                index = self.joint_ids[name] - 1
+                if not 0 <= index < len(angle_list):
+                    raise RuntimeError(
+                        "Joint ID %s for %s is outside full frame length %s"
+                        % (self.joint_ids[name], name, len(angle_list))
+                    )
+                angle_list[index] = self.current_angles[name]
 
         try:
-            msg, _, _, _ = build_joint_control_message(joint_id_list, angle_list, self.control_id)
+            msg, _, _, _ = build_joint_control_message(
+                joint_id_list,
+                angle_list,
+                self.control_id,
+                time_from_start=time_from_start,
+            )
             self.publisher.publish(msg)
         except Exception:
             self.publisher.publish(positions=angle_list, mainControlID=self.control_id)
@@ -369,6 +449,11 @@ def build_arg_parser():
     parser.add_argument("--input-topic", default=DEFAULT_INPUT_TOPIC, help="Pose JSON input topic.")
     parser.add_argument("--joint-topic", default=DEFAULT_JOINT_TOPIC, help="JointControlPoint output topic.")
     parser.add_argument(
+        "--servo-position-topic",
+        default=DEFAULT_SERVO_POSITION_TOPIC,
+        help="Servo position topic used to preserve non-upper-body joints in full-frame mode.",
+    )
+    parser.add_argument(
         "--joint-ids",
         type=parse_joint_ids,
         default=parse_joint_ids(default_ids),
@@ -408,6 +493,7 @@ def main():
     rospy.loginfo("Subscribing topic: %s", args.input_topic)
     rospy.loginfo("Publishing topic: %s", args.joint_topic)
     rospy.loginfo("JointControlPoint fields: %s", getattr(probe_msg, "__slots__", []))
+    rospy.loginfo("Joint ID field supported: %s", controller.supports_joint_ids)
     rospy.loginfo("mainControlID=%s", controller.control_id)
 
     thread = threading.Thread(target=controller.control_loop)

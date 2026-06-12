@@ -9,7 +9,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 MODE="${MODE:-fake}"
 INPUT_TOPIC="${INPUT_TOPIC:-/upper_body_pose_angles}"
-JOINT_TOPIC="${JOINT_TOPIC:-/MediumSize/BodyHub/JointPosition}"
+JOINT_TOPIC="${JOINT_TOPIC:-/MediumSize/BodyHub/MotoPosition}"
 JOINT_IDS="${JOINT_IDS:-14,15,17,18}"
 
 POSE_HZ="${POSE_HZ:-30}"

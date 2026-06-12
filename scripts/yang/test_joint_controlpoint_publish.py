@@ -8,11 +8,14 @@ import time
 
 import rospy
 from bodyhub.msg import JointControlPoint
+from bodyhub.msg import ServoPositionAngle
 
 
-DEFAULT_TOPIC = "/MediumSize/BodyHub/JointPosition"
+DEFAULT_TOPIC = "/MediumSize/BodyHub/MotoPosition"
+DEFAULT_SERVO_POSITION_TOPIC = "/MediumSize/BodyHub/ServoPositions"
 DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
 MAX_DEFAULT_AMPLITUDE = 8.0
+BASE_FRAME = [0,0,0,0,0,0,0,0,0,0,0,0,0,-61,-18,0,61,18,0,0,0,0]
 
 
 def clamp(value, low, high):
@@ -45,7 +48,24 @@ def set_message_field(msg, field_names, values):
     return None
 
 
-def build_joint_control_message(joint_ids, angles, control_id):
+def joint_control_supports_joint_ids():
+    msg = JointControlPoint()
+    return any(
+        hasattr(msg, field_name)
+        for field_name in [
+            "jointIdList",
+            "jointIDList",
+            "jointIds",
+            "jointIDs",
+            "idList",
+            "ids",
+            "jointId",
+            "jointID",
+        ]
+    )
+
+
+def build_joint_control_message(joint_ids, angles, control_id, time_from_start=None):
     msg = JointControlPoint()
 
     id_field = set_message_field(
@@ -63,6 +83,8 @@ def build_joint_control_message(joint_ids, angles, control_id):
         ["mainControlID", "mainControlId", "main_control_id", "controlID", "controlId"],
         [int(control_id)],
     )
+    if time_from_start is not None and hasattr(msg, "time_from_start"):
+        msg.time_from_start = rospy.Duration.from_sec(float(time_from_start))
 
     if angle_field is None:
         raise RuntimeError(
@@ -96,6 +118,21 @@ def extract_control_id(response):
     return 0
 
 
+def load_initial_full_position_frame(topic, joint_id):
+    try:
+        msg = rospy.wait_for_message(topic, ServoPositionAngle, timeout=2.0)
+        frame = [float(value) for value in msg.angle]
+        if len(frame) >= joint_id:
+            rospy.loginfo("Using current servo frame from %s, length=%d", topic, len(frame))
+            return frame
+        rospy.logwarn("Servo position frame from %s is too short: length=%d", topic, len(frame))
+    except Exception as err:
+        rospy.logwarn("Could not read initial servo positions: %s", err)
+
+    rospy.logwarn("Falling back to static BASE_FRAME for full-position publish mode.")
+    return BASE_FRAME[:]
+
+
 def get_main_control_id(service_name, explicit_control_id=None):
     if explicit_control_id is not None:
         return int(explicit_control_id)
@@ -113,15 +150,35 @@ def get_main_control_id(service_name, explicit_control_id=None):
         return extract_control_id(response)
     except Exception as err:
         rospy.logwarn("Could not call %s: %s. Using control id 0.", service_name, err)
-        return 0
+    return 0
 
 
-def publish_joint(pub, joint_id, angle, control_id):
+def build_angle_payload(joint_id, angle, supports_joint_ids, full_position_frame):
+    if supports_joint_ids:
+        return [joint_id], [angle]
+
+    positions = full_position_frame[:]
+    index = joint_id - 1
+    if not 0 <= index < len(positions):
+        raise RuntimeError(
+            "Joint ID %s is outside full frame length %s" % (joint_id, len(positions))
+        )
+    positions[index] = angle
+    return [], positions
+
+
+def publish_joint(pub, joint_id, angle, control_id, supports_joint_ids, full_position_frame, hz):
+    joint_ids, angles = build_angle_payload(joint_id, angle, supports_joint_ids, full_position_frame)
     try:
-        msg, _, _, _ = build_joint_control_message([joint_id], [angle], control_id)
+        msg, _, _, _ = build_joint_control_message(
+            joint_ids,
+            angles,
+            control_id,
+            time_from_start=1.0 / max(1.0, hz),
+        )
         pub.publish(msg)
     except Exception:
-        pub.publish(positions=[angle], mainControlID=control_id)
+        pub.publish(positions=angles, mainControlID=control_id)
 
 
 def main():
@@ -132,6 +189,11 @@ def main():
     parser.add_argument("--amplitude", type=float, default=5.0, help="Sine amplitude in degrees, clamped to +/-8.")
     parser.add_argument("--hz", type=float, default=20.0, help="Publish frequency.")
     parser.add_argument("--duration", type=float, default=5.0, help="Motion duration in seconds.")
+    parser.add_argument(
+        "--servo-position-topic",
+        default=DEFAULT_SERVO_POSITION_TOPIC,
+        help="Servo position topic used to preserve non-tested joints in full-frame mode.",
+    )
     parser.add_argument("--service", default=DEFAULT_SERVICE, help="GetMasterID service name.")
     parser.add_argument("--control-id", type=int, default=None, help="Override mainControlID instead of calling service.")
     args = parser.parse_args()
@@ -144,9 +206,14 @@ def main():
 
     control_id = get_main_control_id(args.service, args.control_id)
     pub = rospy.Publisher(args.topic, JointControlPoint, queue_size=10)
+    supports_joint_ids = joint_control_supports_joint_ids()
+    full_position_frame = None
+    if not supports_joint_ids:
+        full_position_frame = load_initial_full_position_frame(args.servo_position_topic, args.joint_id)
 
     probe_msg = JointControlPoint()
     rospy.loginfo("JointControlPoint fields: %s", getattr(probe_msg, "__slots__", []))
+    rospy.loginfo("Joint ID field supported: %s", supports_joint_ids)
     rospy.sleep(0.5)
 
     rate = rospy.Rate(args.hz)
@@ -156,7 +223,7 @@ def main():
     while not rospy.is_shutdown() and time.time() - start < args.duration:
         elapsed = time.time() - start
         angle = args.base_angle + amplitude * math.sin(2.0 * math.pi * elapsed / period)
-        publish_joint(pub, args.joint_id, angle, control_id)
+        publish_joint(pub, args.joint_id, angle, control_id, supports_joint_ids, full_position_frame, args.hz)
         print(
             "publish joint_id=%s angle=%.1f mainControlID=%s"
             % (args.joint_id, angle, control_id)
@@ -170,7 +237,7 @@ def main():
             break
         ratio = float(index + 1) / float(steps)
         angle = current + ratio * (args.base_angle - current)
-        publish_joint(pub, args.joint_id, angle, control_id)
+        publish_joint(pub, args.joint_id, angle, control_id, supports_joint_ids, full_position_frame, args.hz)
         print(
             "publish joint_id=%s angle=%.1f mainControlID=%s"
             % (args.joint_id, angle, control_id)

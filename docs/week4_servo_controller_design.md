@@ -18,6 +18,19 @@ servo control loop                   100Hz JointControlPoint publish by default
 Roban upper body                     smooth continuous tracking
 ```
 
+On the tested robot, `rosmsg show bodyhub/JointControlPoint` reports:
+
+```text
+float64[] positions
+float64[] velocities
+float64[] accelerations
+float64[] effort
+duration time_from_start
+uint16 mainControlID
+```
+
+That means the controller cannot rely on `jointIdList`. In full-position mode it first reads `/MediumSize/BodyHub/ServoPositions`, preserves the current 22-joint frame for non-upper-body joints, and only overwrites the configured upper-body IDs.
+
 The callback is intentionally small. It parses `std_msgs/String`, checks `visible` and `confidence`, maps human arm angles to four Roban upper-body joint targets, stores those targets in a thread-safe `TargetState`, and returns immediately.
 
 The control loop runs independently at `--hz` and always publishes the latest smoothed joint command. If the pose is stale or invalid, it smoothly returns to the safe base pose.
@@ -109,7 +122,7 @@ Test one joint through `JointControlPoint`:
 
 ```bash
 python scripts/yang/test_joint_controlpoint_publish.py \
-  --topic /MediumSize/BodyHub/JointPosition \
+  --topic /MediumSize/BodyHub/MotoPosition \
   --joint-id 17 \
   --base-angle 61 \
   --amplitude 5 \
@@ -128,7 +141,7 @@ Run the new servo controller:
 ```bash
 python scripts/yang/week4_servo_upper_body_controller.py \
   --input-topic /upper_body_pose_angles \
-  --joint-topic /MediumSize/BodyHub/JointPosition \
+  --joint-topic /MediumSize/BodyHub/MotoPosition \
   --joint-ids 14,15,17,18 \
   --hz 100 \
   --confidence-threshold 0.85 \
@@ -178,5 +191,5 @@ scripts/yang/start_week4_servo_debug_tmux.sh
 Recommended evidence to capture during testing:
 
 - `rostopic hz /upper_body_pose_angles`, expected around 5-10Hz with the real camera path or 30Hz with the fake publisher.
-- `rostopic hz /MediumSize/BodyHub/JointPosition` or the actual JointControlPoint topic, expected near 100Hz if BodyHub and ROS scheduling keep up.
+- `rostopic hz /MediumSize/BodyHub/MotoPosition` or the actual JointControlPoint topic, expected near 100Hz if BodyHub and ROS scheduling keep up.
 - A short video or screenshot showing continuous arm tracking with fake pose input.
