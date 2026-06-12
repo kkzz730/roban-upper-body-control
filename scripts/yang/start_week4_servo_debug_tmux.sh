@@ -5,6 +5,7 @@ SESSION="${SESSION:-roban_week4_servo}"
 REPO_DIR="${REPO_DIR:-$HOME/roban-upper-body-control}"
 CATKIN_WS="${CATKIN_WS:-$HOME/robot_ros_application/catkin_ws}"
 SETUP_BASH="${SETUP_BASH:-$CATKIN_WS/devel/setup.bash}"
+ACTION_SCRIPTS_DIR="${ACTION_SCRIPTS_DIR:-$CATKIN_WS/src/ros_actions_node/scripts}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 MODE="${MODE:-fake}"
@@ -70,7 +71,7 @@ else
 fi
 
 if [ "$CONTROLLER_MODE" = "legacy" ]; then
-    CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_upper_body_controller.py"
+    CONTROLLER_CMD="$COMMON_CMD && export PYTHONPATH=$(quote "$ACTION_SCRIPTS_DIR"):\$PYTHONPATH && $PYTHON_BIN scripts/yang/week4_upper_body_controller.py"
     RATE_CMD="$COMMON_CMD && echo 'Measuring pose input rate on $INPUT_TOPIC' && rostopic hz $(quote "$INPUT_TOPIC")"
 elif [ "$CONTROLLER_MODE" = "servo" ]; then
     CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --source-stale-timeout $(quote "$SOURCE_STALE_TIMEOUT") --pre-action-home-duration $(quote "$PRE_ACTION_HOME_DURATION") --shutdown-home-duration $(quote "$SHUTDOWN_HOME_DURATION") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
