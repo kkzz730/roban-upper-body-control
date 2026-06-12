@@ -53,7 +53,7 @@ COMMON_CMD="cd $(quote "$REPO_DIR") && source $(quote "$SETUP_BASH")"
 if [ "$MODE" = "fake" ]; then
     POSE_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/fake_pose_high_rate_publisher.py --topic $(quote "$INPUT_TOPIC") --hz $(quote "$POSE_HZ") --mode $(quote "$POSE_MODE")"
 elif [ "$MODE" = "real" ]; then
-    POSE_CMD="$COMMON_CMD && echo 'Waiting for real pose input on $INPUT_TOPIC' && rostopic hz $(quote "$INPUT_TOPIC")"
+    POSE_CMD="$COMMON_CMD && $PYTHON_BIN scripts/zhang/json_pose_publisher.py"
 else
     echo "Unknown MODE=$MODE. Use MODE=fake or MODE=real."
     exit 1

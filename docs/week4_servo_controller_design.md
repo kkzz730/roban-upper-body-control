@@ -159,7 +159,7 @@ scripts/yang/start_week4_servo_debug_tmux.sh
 
 The panes are:
 
-- fake pose publisher at 30Hz, or input-rate monitor when `MODE=real`
+- fake pose publisher at 30Hz, or `json_pose_publisher.py` when `MODE=real`
 - servo controller at 100Hz
 - `rostopic hz` monitor for the JointControlPoint topic
 
@@ -168,6 +168,14 @@ For the real Mac pose pipeline instead of fake poses:
 ```bash
 MODE=real scripts/yang/start_week4_servo_debug_tmux.sh
 ```
+
+In real mode the first pane runs `scripts/zhang/json_pose_publisher.py`, which reads:
+
+```text
+/home/lemon/roban_motion_control/week4/logs/upper_body_pose_angles.json
+```
+
+and publishes it to `/upper_body_pose_angles`. The Mac pose sender must keep pushing fresh JSON to that file.
 
 The default debug script controls both arms:
 
