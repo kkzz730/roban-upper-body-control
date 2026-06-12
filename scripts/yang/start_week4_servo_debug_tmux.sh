@@ -18,9 +18,10 @@ CONTROL_ID="${CONTROL_ID:-2}"
 POSE_HZ="${POSE_HZ:-30}"
 SERVO_HZ="${SERVO_HZ:-100}"
 CONFIDENCE_THRESHOLD="${CONFIDENCE_THRESHOLD:-0.85}"
-STALE_TIMEOUT="${STALE_TIMEOUT:-0.6}"
-SOURCE_STALE_TIMEOUT="${SOURCE_STALE_TIMEOUT:-2.0}"
-PRE_ACTION_HOME_DURATION="${PRE_ACTION_HOME_DURATION:-1.0}"
+STALE_TIMEOUT="${STALE_TIMEOUT:-1.5}"
+SOURCE_STALE_TIMEOUT="${SOURCE_STALE_TIMEOUT:-6.0}"
+DROPOUT_HOLD_DURATION="${DROPOUT_HOLD_DURATION:-1.5}"
+PRE_ACTION_HOME_DURATION="${PRE_ACTION_HOME_DURATION:-0.0}"
 SHUTDOWN_HOME_DURATION="${SHUTDOWN_HOME_DURATION:-1.5}"
 ALPHA="${ALPHA:-0.25}"
 MAX_STEP_DEG="${MAX_STEP_DEG:-0.6}"
@@ -65,7 +66,7 @@ else
     exit 1
 fi
 
-CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --source-stale-timeout $(quote "$SOURCE_STALE_TIMEOUT") --pre-action-home-duration $(quote "$PRE_ACTION_HOME_DURATION") --shutdown-home-duration $(quote "$SHUTDOWN_HOME_DURATION") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
+CONTROLLER_CMD="$COMMON_CMD && $PYTHON_BIN scripts/yang/week4_servo_upper_body_controller.py --input-topic $(quote "$INPUT_TOPIC") --joint-topic $(quote "$JOINT_TOPIC") --joint-ids $(quote "$JOINT_IDS") --enabled-arms $(quote "$ENABLED_ARMS") --control-id $(quote "$CONTROL_ID") --prepare-bodyhub --hz $(quote "$SERVO_HZ") --confidence-threshold $(quote "$CONFIDENCE_THRESHOLD") --stale-timeout $(quote "$STALE_TIMEOUT") --source-stale-timeout $(quote "$SOURCE_STALE_TIMEOUT") --dropout-hold-duration $(quote "$DROPOUT_HOLD_DURATION") --pre-action-home-duration $(quote "$PRE_ACTION_HOME_DURATION") --shutdown-home-duration $(quote "$SHUTDOWN_HOME_DURATION") --alpha $(quote "$ALPHA") --max-step-deg $(quote "$MAX_STEP_DEG")"
 RATE_CMD="$COMMON_CMD && echo 'Measuring JointControlPoint publish rate on $JOINT_TOPIC' && rostopic hz $(quote "$JOINT_TOPIC")"
 
 tmux new-session -d -s "$SESSION" -n week4 -c "$REPO_DIR"

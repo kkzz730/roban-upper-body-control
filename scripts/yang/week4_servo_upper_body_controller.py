@@ -379,6 +379,8 @@ class ServoUpperBodyController(object):
         self.last_bodyhub_check_time = 0.0
         self.last_bodyhub_warning_time = 0.0
         self.last_bodyhub_signature = None
+        self.last_valid_target_angles = BASE_ANGLES.copy()
+        self.last_valid_target_time = 0.0
         self.in_valid_segment = False
         self.pre_action_home_until = 0.0
         self.shutdown_started = False
@@ -475,6 +477,17 @@ class ServoUpperBodyController(object):
             and snapshot["visible"]
             and snapshot["confidence"] >= self.args.confidence_threshold
         )
+
+        if valid:
+            self.last_valid_target_angles = snapshot["target_angles"].copy()
+            self.last_valid_target_time = now
+            return snapshot["target_angles"].copy(), True, snapshot
+
+        if (
+            self.last_valid_target_time > 0.0
+            and now - self.last_valid_target_time <= self.args.dropout_hold_duration
+        ):
+            return self.last_valid_target_angles.copy(), True, snapshot
 
         if stale:
             if now - self.last_stale_warning_time > 1.0:
@@ -676,6 +689,7 @@ def build_arg_parser():
     parser.add_argument("--confidence-threshold", type=float, default=0.85, help="Minimum pose confidence.")
     parser.add_argument("--stale-timeout", type=float, default=0.6, help="Seconds before pose data is stale.")
     parser.add_argument("--source-stale-timeout", type=float, default=2.0, help="Seconds before pose JSON timestamp is stale.")
+    parser.add_argument("--dropout-hold-duration", type=float, default=1.5, help="Seconds to hold the last valid pose before returning home.")
     parser.add_argument("--pre-action-home-duration", type=float, default=1.0, help="Seconds to hold home before following a fresh valid pose segment.")
     parser.add_argument("--shutdown-home-duration", type=float, default=1.5, help="Seconds to publish home during controller shutdown.")
     parser.add_argument("--alpha", type=float, default=0.25, help="Low-pass filter coefficient.")
@@ -705,6 +719,7 @@ def main():
     args.hz = max(1.0, args.hz)
     args.bodyhub_check_interval = max(0.2, args.bodyhub_check_interval)
     args.source_stale_timeout = max(args.stale_timeout, args.source_stale_timeout)
+    args.dropout_hold_duration = max(0.0, args.dropout_hold_duration)
     args.pre_action_home_duration = max(0.0, args.pre_action_home_duration)
     args.shutdown_home_duration = max(0.0, args.shutdown_home_duration)
 
