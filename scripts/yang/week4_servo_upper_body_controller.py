@@ -356,6 +356,9 @@ class ServoUpperBodyController(object):
         self.running = True
         self.last_log_time = 0.0
         self.last_stale_warning_time = 0.0
+        self.last_bodyhub_check_time = 0.0
+        self.last_bodyhub_warning_time = 0.0
+        self.last_bodyhub_signature = None
         self.control_id = get_main_control_id(args)
         if args.prepare_bodyhub:
             prepare_bodyhub(args, self.control_id)
@@ -483,6 +486,47 @@ class ServoUpperBodyController(object):
         except Exception:
             self.publisher.publish(positions=angle_list, mainControlID=self.control_id)
 
+    def keep_bodyhub_ready(self):
+        if not self.args.prepare_bodyhub:
+            return
+
+        now = time.time()
+        if now - self.last_bodyhub_check_time < self.args.bodyhub_check_interval:
+            return
+        self.last_bodyhub_check_time = now
+
+        current_id = get_bodyhub_control_id(self.args.service)
+        status = get_bodyhub_status(self.args.status_service)
+        signature = (status, current_id)
+        if signature != self.last_bodyhub_signature:
+            rospy.loginfo("BodyHub status=%s currentControlID=%s", status, current_id)
+            self.last_bodyhub_signature = signature
+
+        if status == "preReady" or current_id not in (int(self.control_id),):
+            result = set_bodyhub_status(
+                self.args.state_service,
+                self.control_id,
+                "setStatus",
+            )
+            rospy.logwarn(
+                "Re-requested BodyHub control: status=%s currentControlID=%s "
+                "requestedID=%s stateRes=%s",
+                status,
+                current_id,
+                self.control_id,
+                result,
+            )
+            return
+
+        if status not in ("ready", "running", "pause"):
+            if now - self.last_bodyhub_warning_time > 2.0:
+                rospy.logwarn(
+                    "Unexpected BodyHub status=%s currentControlID=%s",
+                    status,
+                    current_id,
+                )
+                self.last_bodyhub_warning_time = now
+
     def log_status(self, valid, snapshot):
         now = time.time()
         if now - self.last_log_time < 0.5:
@@ -517,6 +561,7 @@ class ServoUpperBodyController(object):
         while not rospy.is_shutdown() and self.running:
             target, valid, snapshot = self.get_control_target()
             self.smooth_current_angles(target)
+            self.keep_bodyhub_ready()
             self.publish_current_angles()
             self.log_status(valid, snapshot)
             rate.sleep()
@@ -563,6 +608,7 @@ def build_arg_parser():
     parser.add_argument("--state-service", default="/MediumSize/BodyHub/StateJump", help="BodyHub state transition service name.")
     parser.add_argument("--control-id", type=int, default=None, help="Override mainControlID instead of calling service.")
     parser.add_argument("--default-control-id", type=int, default=DEFAULT_CONTROL_ID, help="Control ID used when BodyHub reports 0.")
+    parser.add_argument("--bodyhub-check-interval", type=float, default=1.0, help="Seconds between runtime BodyHub status checks.")
     parser.add_argument("--prepare-bodyhub", action="store_true", default=True, help="Set BodyHub to ready when it is preReady.")
     parser.add_argument("--no-prepare-bodyhub", action="store_false", dest="prepare_bodyhub", help="Do not change BodyHub state at startup.")
     return parser
@@ -574,6 +620,7 @@ def main():
     args.alpha = clamp(args.alpha, 0.0, 1.0)
     args.max_step_deg = max(0.0, args.max_step_deg)
     args.hz = max(1.0, args.hz)
+    args.bodyhub_check_interval = max(0.2, args.bodyhub_check_interval)
 
     rospy.init_node("week4_servo_upper_body_controller", anonymous=True)
 
