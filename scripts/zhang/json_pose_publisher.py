@@ -11,7 +11,7 @@ from std_msgs.msg import String
 
 JSON_PATH = "/home/lemon/roban_motion_control/week4/logs/upper_body_pose_angles.json"
 OUTPUT_TOPIC = "/upper_body_pose_angles"
-PUBLISH_HZ = 2.0
+PUBLISH_HZ = 20.0
 
 
 class JsonPosePublisher(object):
@@ -24,6 +24,8 @@ class JsonPosePublisher(object):
 
         self.last_text = None
         self.last_mtime = 0.0
+        self.last_logged_text = None
+        self.last_log_time = 0.0
 
         rospy.loginfo("Reading pose JSON from: %s", JSON_PATH)
         rospy.loginfo("Publishing ROS topic: %s", OUTPUT_TOPIC)
@@ -75,7 +77,11 @@ class JsonPosePublisher(object):
         while not rospy.is_shutdown():
             text = self.read_json_text()
             self.pub.publish(String(data=text))
-            rospy.loginfo("publish pose json: %s", text)
+            now = time.time()
+            if text != self.last_logged_text or now - self.last_log_time > 1.0:
+                rospy.loginfo("publish pose json: %s", text)
+                self.last_logged_text = text
+                self.last_log_time = now
             rate.sleep()
 
 

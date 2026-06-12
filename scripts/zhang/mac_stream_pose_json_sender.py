@@ -3,12 +3,17 @@
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import time
 
 import cv2
 
-from pose_detector import UpperBodyPoseDetector, draw_pose_result_overlay
+from pose_detector import (
+    UpperBodyPoseDetector,
+    calculate_arm_raise_angle,
+    draw_pose_result_overlay,
+)
 from smoothing_filter import AngleSmoother
 
 
@@ -85,6 +90,113 @@ def push_json_to_robot(local_json_path, remote_user, robot_ip, remote_json_path)
     return True
 
 
+class RemoteJsonStreamWriter(object):
+    def __init__(self, remote_user, robot_ip, remote_json_path):
+        self.remote_user = remote_user
+        self.robot_ip = robot_ip
+        self.remote_json_path = remote_json_path
+        self.proc = None
+
+    def start(self):
+        remote_host = "%s@%s" % (self.remote_user, self.robot_ip)
+        remote_tmp_path = self.remote_json_path.replace(".json", ".tmp.json")
+        script = """
+import os
+import sys
+
+path = %r
+tmp = %r
+directory = os.path.dirname(path)
+if directory and not os.path.exists(directory):
+    try:
+        os.makedirs(directory)
+    except OSError:
+        pass
+
+for line in sys.stdin:
+    line = line.rstrip("\\n")
+    if not line:
+        continue
+    f = open(tmp, "w")
+    f.write(line + "\\n")
+    f.close()
+    os.rename(tmp, path)
+""" % (self.remote_json_path, remote_tmp_path)
+
+        remote_cmd = "python -u -c %s" % shlex.quote(script)
+        self.proc = subprocess.Popen(
+            ["ssh", remote_host, remote_cmd],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+
+    def close(self):
+        if self.proc is None:
+            return
+        try:
+            if self.proc.stdin:
+                self.proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass
+        self.proc = None
+
+    def push(self, data):
+        if self.proc is None or self.proc.poll() is not None:
+            self.close()
+            self.start()
+
+        line = json.dumps(
+            data,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+        try:
+            self.proc.stdin.write(line + "\n")
+            self.proc.stdin.flush()
+            return True
+        except Exception:
+            self.close()
+            return False
+
+
+def apply_raise_angle_source(result, source):
+    if source == "upper-arm" or not result.get("visible", False):
+        result["raise_angle_source"] = source
+        return result
+
+    updated = dict(result)
+    updated["left_upper_arm_raise_angle"] = result.get("left_arm_raise_angle")
+    updated["right_upper_arm_raise_angle"] = result.get("right_arm_raise_angle")
+
+    left_hand_raise = calculate_arm_raise_angle(
+        result["left_shoulder"],
+        result["left_wrist"],
+    )
+    right_hand_raise = calculate_arm_raise_angle(
+        result["right_shoulder"],
+        result["right_wrist"],
+    )
+
+    updated["left_hand_raise_angle"] = left_hand_raise
+    updated["right_hand_raise_angle"] = right_hand_raise
+
+    if source == "wrist":
+        if left_hand_raise is not None:
+            updated["left_arm_raise_angle"] = left_hand_raise
+        if right_hand_raise is not None:
+            updated["right_arm_raise_angle"] = right_hand_raise
+
+    updated["raise_angle_source"] = source
+    return updated
+
+
 def build_publish_json(smoothed_result):
     timestamp = time.time()
 
@@ -100,11 +212,15 @@ def build_publish_json(smoothed_result):
                 "reason",
                 "low visibility or no person"
             ),
+            "raise_angle_source": smoothed_result.get(
+                "raise_angle_source",
+                "unknown",
+            ),
             "source": SOURCE_NAME,
             "timestamp": timestamp
         }
 
-    return {
+    data = {
         "visible": True,
         "confidence": float(smoothed_result.get("confidence", 0.0)),
         "left_arm_raise_angle": smoothed_result.get(
@@ -124,9 +240,26 @@ def build_publish_json(smoothed_result):
             smoothed_result.get("right_elbow_angle")
         ),
         "reason": smoothed_result.get("reason", "ok"),
+        "raise_angle_source": smoothed_result.get(
+            "raise_angle_source",
+            "unknown",
+        ),
         "source": SOURCE_NAME,
         "timestamp": timestamp
     }
+
+    for field in [
+        "left_upper_arm_raise_angle",
+        "right_upper_arm_raise_angle",
+        "left_hand_raise_angle",
+        "right_hand_raise_angle",
+        "left_arm_raise_angle",
+        "right_arm_raise_angle",
+    ]:
+        if field in smoothed_result:
+            data["raw_" + field] = smoothed_result.get(field)
+
+    return data
 
 
 def format_angle(value):
@@ -175,7 +308,26 @@ def main():
         default=10,
         help="save overlay image every N processed frames"
     )
+    parser.add_argument(
+        "--upload-mode",
+        choices=["ssh-stream", "scp"],
+        default="ssh-stream",
+        help="Remote JSON upload mode. ssh-stream keeps one SSH process open.",
+    )
+    parser.add_argument(
+        "--smoothing-alpha",
+        type=float,
+        default=0.45,
+        help="Angle smoothing alpha. Higher is faster, lower is smoother.",
+    )
+    parser.add_argument(
+        "--raise-angle-source",
+        choices=["wrist", "upper-arm"],
+        default="wrist",
+        help="Use shoulder-to-wrist or shoulder-to-elbow for arm raise angle.",
+    )
     args = parser.parse_args()
+    args.smoothing_alpha = max(0.0, min(1.0, args.smoothing_alpha))
 
     ensure_dirs()
 
@@ -185,6 +337,9 @@ def main():
     print("Remote JSON:", args.remote_json)
     print("Target frequency: %.1f Hz" % args.hz)
     print("Min visibility:", args.min_visibility)
+    print("Upload mode:", args.upload_mode)
+    print("Smoothing alpha:", args.smoothing_alpha)
+    print("Raise angle source:", args.raise_angle_source)
 
     cap = cv2.VideoCapture(args.stream_url)
     if not cap.isOpened():
@@ -196,72 +351,99 @@ def main():
         print("4. Try URL with &type=mjpeg.")
         return
 
-    smoother = AngleSmoother(alpha=0.12)
+    smoother = AngleSmoother(alpha=args.smoothing_alpha)
     detector = UpperBodyPoseDetector(min_detection_confidence=0.6, min_tracking_confidence=0.7)
     frame_count = 0
     loop_interval = 1.0 / max(args.hz, 0.1)
+    writer = None
+    if args.upload_mode == "ssh-stream":
+        writer = RemoteJsonStreamWriter(
+            args.remote_user,
+            args.robot_ip,
+            args.remote_json,
+        )
 
-    with open(LOCAL_LOG_PATH, "a", encoding="utf-8") as log_file:
-        while True:
-            start_time = time.time()
+    try:
+        with open(LOCAL_LOG_PATH, "a", encoding="utf-8") as log_file:
+            while True:
+                start_time = time.time()
 
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                print("Failed to read frame from stream.")
-                time.sleep(loop_interval)
-                continue
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print("Failed to read frame from stream.")
+                    time.sleep(loop_interval)
+                    continue
 
-            raw_result = detector.detect(
-                frame,
-                min_visibility=args.min_visibility
-            )
+                raw_result = detector.detect(
+                    frame,
+                    min_visibility=args.min_visibility
+                )
+                raw_result = apply_raise_angle_source(
+                    raw_result,
+                    args.raise_angle_source,
+                )
 
-            smoothed_result = smoother.update_result(raw_result)
-            publish_json = build_publish_json(smoothed_result)
+                smoothed_result = smoother.update_result(raw_result)
+                publish_json = build_publish_json(smoothed_result)
 
-            atomic_write_local_json(publish_json)
+                atomic_write_local_json(publish_json)
 
-            push_ok = push_json_to_robot(
-                LOCAL_JSON_PATH,
-                args.remote_user,
-                args.robot_ip,
-                args.remote_json
-            )
+                if writer is not None:
+                    push_ok = writer.push(publish_json)
+                    if not push_ok:
+                        push_ok = push_json_to_robot(
+                            LOCAL_JSON_PATH,
+                            args.remote_user,
+                            args.robot_ip,
+                            args.remote_json
+                        )
+                else:
+                    push_ok = push_json_to_robot(
+                        LOCAL_JSON_PATH,
+                        args.remote_user,
+                        args.robot_ip,
+                        args.remote_json
+                    )
 
-            if frame_count % max(args.overlay_interval, 1) == 0:
-                overlay = draw_pose_result_overlay(frame, raw_result)
-                cv2.imwrite(LOCAL_OVERLAY_PATH, overlay)
+                if frame_count % max(args.overlay_interval, 1) == 0:
+                    overlay = draw_pose_result_overlay(frame, raw_result)
+                    cv2.imwrite(LOCAL_OVERLAY_PATH, overlay)
 
-            now = time.time()
-            elapsed = now - start_time
-            actual_hz = 1.0 / elapsed if elapsed > 1e-6 else 0.0
+                now = time.time()
+                elapsed = now - start_time
+                actual_hz = 1.0 / elapsed if elapsed > 1e-6 else 0.0
 
-            line = (
-                "visible={visible} conf={conf:.3f} "
-                "L_raise={lra} L_elbow={le} "
-                "R_raise={rra} R_elbow={re} "
-                "push_ok={push_ok} actual_hz={hz:.2f} "
-                "reason={reason}"
-            ).format(
-                visible=publish_json["visible"],
-                conf=publish_json["confidence"],
-                lra=format_angle(publish_json["left_arm_raise_angle"]),
-                le=format_angle(publish_json["left_elbow_angle"]),
-                rra=format_angle(publish_json["right_arm_raise_angle"]),
-                re=format_angle(publish_json["right_elbow_angle"]),
-                push_ok=push_ok,
-                hz=actual_hz,
-                reason=publish_json["reason"]
-            )
+                line = (
+                    "visible={visible} conf={conf:.3f} "
+                    "L_raise={lra} L_elbow={le} "
+                    "R_raise={rra} R_elbow={re} "
+                    "push_ok={push_ok} actual_hz={hz:.2f} "
+                    "reason={reason}"
+                ).format(
+                    visible=publish_json["visible"],
+                    conf=publish_json["confidence"],
+                    lra=format_angle(publish_json["left_arm_raise_angle"]),
+                    le=format_angle(publish_json["left_elbow_angle"]),
+                    rra=format_angle(publish_json["right_arm_raise_angle"]),
+                    re=format_angle(publish_json["right_elbow_angle"]),
+                    push_ok=push_ok,
+                    hz=actual_hz,
+                    reason=publish_json["reason"]
+                )
 
-            print(line)
-            log_file.write(json.dumps(publish_json, ensure_ascii=False) + "\n")
-            log_file.flush()
+                print(line)
+                log_file.write(json.dumps(publish_json, ensure_ascii=False) + "\n")
+                log_file.flush()
 
-            frame_count += 1
+                frame_count += 1
 
-            sleep_time = max(0.0, loop_interval - elapsed)
-            time.sleep(sleep_time)
+                sleep_time = max(0.0, loop_interval - elapsed)
+                time.sleep(sleep_time)
+    finally:
+        detector.close()
+        cap.release()
+        if writer is not None:
+            writer.close()
 
 
 if __name__ == "__main__":

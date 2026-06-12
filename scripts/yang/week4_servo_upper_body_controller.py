@@ -47,7 +47,7 @@ DEFAULT_JOINT_TOPIC = "/MediumSize/BodyHub/MotoPosition"
 DEFAULT_SERVO_POSITION_TOPIC = "/MediumSize/BodyHub/ServoPositions"
 DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
 DEFAULT_CONTROL_HZ = 100.0
-DEFAULT_MAX_STEP_DEG = 0.6
+DEFAULT_MAX_STEP_DEG = 1.0
 DEFAULT_CONTROL_ID = 2
 
 ARM_JOINTS = {
@@ -504,7 +504,10 @@ class ServoUpperBodyController(object):
                     self.args.pre_action_home_duration,
                 )
 
-            if now < self.pre_action_home_until:
+            if (
+                now < self.pre_action_home_until
+                or not self.is_home_reached()
+            ):
                 return self.home_angles.copy(), False
 
             return target, True
@@ -515,6 +518,12 @@ class ServoUpperBodyController(object):
             self.pre_action_home_until = 0.0
 
         return self.home_angles.copy(), False
+
+    def is_home_reached(self):
+        for name in self.enabled_joint_names:
+            if abs(self.current_angles[name] - self.home_angles[name]) > self.args.home_tolerance_deg:
+                return False
+        return True
 
     def smooth_current_angles(self, target):
         for name in self.enabled_joint_names:
@@ -676,8 +685,9 @@ def build_arg_parser():
     parser.add_argument("--confidence-threshold", type=float, default=0.85, help="Minimum pose confidence.")
     parser.add_argument("--stale-timeout", type=float, default=0.6, help="Seconds before pose data is stale.")
     parser.add_argument("--source-stale-timeout", type=float, default=2.0, help="Seconds before pose JSON timestamp is stale.")
-    parser.add_argument("--pre-action-home-duration", type=float, default=1.0, help="Seconds to hold home before following a fresh valid pose segment.")
+    parser.add_argument("--pre-action-home-duration", type=float, default=0.3, help="Seconds to hold home before following a fresh valid pose segment.")
     parser.add_argument("--shutdown-home-duration", type=float, default=1.5, help="Seconds to publish home during controller shutdown.")
+    parser.add_argument("--home-tolerance-deg", type=float, default=2.0, help="Max joint error allowed before a new pose segment can start.")
     parser.add_argument("--alpha", type=float, default=0.25, help="Low-pass filter coefficient.")
     parser.add_argument("--max-step-deg", type=float, default=DEFAULT_MAX_STEP_DEG, help="Max per-cycle angle step in degrees.")
     parser.add_argument(
@@ -707,6 +717,7 @@ def main():
     args.source_stale_timeout = max(args.stale_timeout, args.source_stale_timeout)
     args.pre_action_home_duration = max(0.0, args.pre_action_home_duration)
     args.shutdown_home_duration = max(0.0, args.shutdown_home_duration)
+    args.home_tolerance_deg = max(0.0, args.home_tolerance_deg)
 
     rospy.init_node("week4_servo_upper_body_controller", anonymous=True)
 
