@@ -7,8 +7,12 @@ import json
 import time
 from std_msgs.msg import String
 
-# Stable base frame from previous verified Roban action scripts.
-BASE_FRAME = [0,0,0,0,0,0,0,0,0,0,0,0,0,-61,-18,0,61,18,0,0,0,0]
+# Stable base frame read from BodyHub ServoPositions on the current robot.
+BASE_FRAME = [
+    0.0, -1.81067, 19.2848, -34.5006, -15.2158, -1.81067,
+    0.0, 1.81067, -19.2848, 34.5006, 15.2158, 1.81067,
+    0.0, -70.0, -15.0, 0.0, 70.0, 15.0, 0.0, 0.0, 0.0, 0.0,
+]
 
 # Conservative upper-body joint indices based on previous action-frame tests.
 LEFT_SHOULDER_IDX = 13
