@@ -47,7 +47,7 @@ DEFAULT_JOINT_TOPIC = "/MediumSize/BodyHub/MotoPosition"
 DEFAULT_SERVO_POSITION_TOPIC = "/MediumSize/BodyHub/ServoPositions"
 DEFAULT_SERVICE = "/MediumSize/BodyHub/GetMasterID"
 DEFAULT_CONTROL_HZ = 100.0
-DEFAULT_MAX_STEP_DEG = 1.0
+DEFAULT_MAX_STEP_DEG = 0.6
 DEFAULT_CONTROL_ID = 2
 
 ARM_JOINTS = {
@@ -63,6 +63,7 @@ class TargetState(object):
         self.visible = False
         self.confidence = 0.0
         self.timestamp = 0.0
+        self.source_timestamp = 0.0
         self.pose = {}
         self.target_angles = BASE_ANGLES.copy()
 
@@ -71,6 +72,7 @@ class TargetState(object):
             self.visible = visible
             self.confidence = confidence
             self.timestamp = time.time()
+            self.source_timestamp = extract_source_timestamp(pose)
             self.pose = pose.copy()
             self.target_angles = target_angles.copy()
 
@@ -80,6 +82,7 @@ class TargetState(object):
                 "visible": self.visible,
                 "confidence": self.confidence,
                 "timestamp": self.timestamp,
+                "source_timestamp": self.source_timestamp,
                 "pose": self.pose.copy(),
                 "target_angles": self.target_angles.copy(),
             }
@@ -119,6 +122,17 @@ def parse_required_float(pose, field_name):
     if field_name not in pose or pose[field_name] is None:
         raise ValueError("missing pose field: %s" % field_name)
     return float(pose[field_name])
+
+
+def extract_source_timestamp(pose):
+    try:
+        timestamp = float(pose.get("timestamp", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+    if timestamp <= 0.0:
+        return 0.0
+    return timestamp
 
 
 def pose_to_target_angles(pose, limits, home_angles=None):
@@ -446,10 +460,16 @@ class ServoUpperBodyController(object):
     def get_control_target(self):
         snapshot = self.state.snapshot()
         now = time.time()
-        stale = (
+        message_stale = (
             snapshot["timestamp"] <= 0.0
             or now - snapshot["timestamp"] > self.args.stale_timeout
         )
+        source_timestamp = snapshot.get("source_timestamp", 0.0)
+        source_stale = (
+            source_timestamp > 0.0
+            and now - source_timestamp > self.args.source_stale_timeout
+        )
+        stale = message_stale or source_stale
         valid = (
             (not stale)
             and snapshot["visible"]
@@ -460,8 +480,9 @@ class ServoUpperBodyController(object):
             if now - self.last_stale_warning_time > 1.0:
                 rospy.logwarn(
                     "pose stale, returning to base pose "
-                    "(message_age=%.2fs)",
+                    "(message_age=%.2fs source_age=%.2fs)",
                     now - snapshot["timestamp"] if snapshot["timestamp"] > 0.0 else -1.0,
+                    now - source_timestamp if source_timestamp > 0.0 else -1.0,
                 )
                 self.last_stale_warning_time = now
             return self.home_angles.copy(), False, snapshot
@@ -483,10 +504,7 @@ class ServoUpperBodyController(object):
                     self.args.pre_action_home_duration,
                 )
 
-            if (
-                now < self.pre_action_home_until
-                or not self.is_home_reached()
-            ):
+            if now < self.pre_action_home_until:
                 return self.home_angles.copy(), False
 
             return target, True
@@ -497,12 +515,6 @@ class ServoUpperBodyController(object):
             self.pre_action_home_until = 0.0
 
         return self.home_angles.copy(), False
-
-    def is_home_reached(self):
-        for name in self.enabled_joint_names:
-            if abs(self.current_angles[name] - self.home_angles[name]) > self.args.home_tolerance_deg:
-                return False
-        return True
 
     def smooth_current_angles(self, target):
         for name in self.enabled_joint_names:
@@ -663,9 +675,9 @@ def build_arg_parser():
     )
     parser.add_argument("--confidence-threshold", type=float, default=0.85, help="Minimum pose confidence.")
     parser.add_argument("--stale-timeout", type=float, default=0.6, help="Seconds before pose data is stale.")
-    parser.add_argument("--pre-action-home-duration", type=float, default=0.3, help="Seconds to hold home before following a fresh valid pose segment.")
+    parser.add_argument("--source-stale-timeout", type=float, default=2.0, help="Seconds before pose JSON timestamp is stale.")
+    parser.add_argument("--pre-action-home-duration", type=float, default=1.0, help="Seconds to hold home before following a fresh valid pose segment.")
     parser.add_argument("--shutdown-home-duration", type=float, default=1.5, help="Seconds to publish home during controller shutdown.")
-    parser.add_argument("--home-tolerance-deg", type=float, default=2.0, help="Max joint error allowed before a new pose segment can start.")
     parser.add_argument("--alpha", type=float, default=0.25, help="Low-pass filter coefficient.")
     parser.add_argument("--max-step-deg", type=float, default=DEFAULT_MAX_STEP_DEG, help="Max per-cycle angle step in degrees.")
     parser.add_argument(
@@ -692,9 +704,9 @@ def main():
     args.max_step_deg = max(0.0, args.max_step_deg)
     args.hz = max(1.0, args.hz)
     args.bodyhub_check_interval = max(0.2, args.bodyhub_check_interval)
+    args.source_stale_timeout = max(args.stale_timeout, args.source_stale_timeout)
     args.pre_action_home_duration = max(0.0, args.pre_action_home_duration)
     args.shutdown_home_duration = max(0.0, args.shutdown_home_duration)
-    args.home_tolerance_deg = max(0.0, args.home_tolerance_deg)
 
     rospy.init_node("week4_servo_upper_body_controller", anonymous=True)
 
