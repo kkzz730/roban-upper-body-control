@@ -420,21 +420,28 @@ class ServoUpperBodyController(object):
         if now - self.last_log_time < 0.5:
             return
         self.last_log_time = now
+        pose = snapshot.get("pose", {})
 
         rospy.loginfo(
             "servo controller running hz=%.1f\n"
             "target valid=%s conf=%.2f\n"
+            "pose angles: left_raise=%s left_elbow=%s right_raise=%s right_elbow=%s\n"
             "current angles: LS=%.1f LE=%.1f RS=%.1f RE=%.1f\n"
-            "publish topic: %s joint_ids=%s",
+            "publish topic: %s joint_ids=%s enabled_arms=%s",
             self.args.hz,
             valid,
             snapshot["confidence"],
+            pose.get("left_arm_raise_angle"),
+            pose.get("left_elbow_angle"),
+            pose.get("right_arm_raise_angle"),
+            pose.get("right_elbow_angle"),
             self.current_angles["left_shoulder"],
             self.current_angles["left_elbow"],
             self.current_angles["right_shoulder"],
             self.current_angles["right_elbow"],
             self.args.joint_topic,
             [self.joint_ids[name] for name in self.enabled_joint_names],
+            self.args.enabled_arms,
         )
 
     def control_loop(self):
